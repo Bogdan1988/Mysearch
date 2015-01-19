@@ -1,0 +1,4 @@
+name = My Search
+description = Enables custom search page.
+core = 7.x
+dependencies[] = node

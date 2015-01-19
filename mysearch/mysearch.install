@@ -1,0 +1,20 @@
+<?php
+/**
+ * @file
+ * Mysearch module install file.
+ *
+ * We will provide custom cache table to store search results.
+ * Time to store resukts will be defined in Minimum cache life time variable
+ * ('cache_lifetime') on page
+ * http://yoursite.com/admin/config/development/performance
+ */
+
+/**
+ * Implements hook_schema().
+ */
+function mysearch_schema() {
+
+  $schema['cache_mysearch_results'] = drupal_get_schema_unprocessed('system', 'cache');
+
+  return $schema;
+}

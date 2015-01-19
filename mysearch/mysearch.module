@@ -1,0 +1,188 @@
+<?php
+
+/**
+ * @file
+ * Mysearch module file
+ *
+ * Custom module to provide simple search page.
+ */
+
+define('MYSEARCH_PATH', 'mysearch');
+
+/**
+ * Implements hook_permission().
+ */
+function mysearch_permission() {
+  return array(
+    'access mysearch' => array(
+      'title' => 'Access My Search',
+      'description' => 'Allows a user to access search results',
+    )
+  );
+}
+
+
+/**
+ * Implements hook_menu().
+ */
+function mysearch_menu() {
+  $items = array();
+
+  $items['mysearch'] = array(
+    'title' => 'Mysearch',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('mysearch_form'),
+    'access arguments' => array('access mysearch'),
+  );
+
+  $items['mysearch/%'] = array(
+    'title callback' => 'mysearch_title',
+    'title arguments' => array(1),
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('mysearch_form', 1),
+    'access arguments' => array('access mysearch'),
+  );
+
+  return $items;
+}
+
+/**
+ * Title callback function.
+ *
+ * @see mysearch_menu().
+ *
+ * @param $keys
+ *
+ * @return string
+ */
+function mysearch_title($keys) {
+  $keys = mysearch_clean_keys($keys);
+  return t('Mysearch') . ' ' . $keys;
+}
+
+/**
+ * Menu callback for search page.
+ *
+ * @see mysearch_menu().
+ */
+function mysearch_form($form, &$form_state, $keys = '') {
+  $form['#attributes']['class'][] = 'search-form';
+  $form['module'] = array('#type' => 'value', '#value' => 'mysearch');
+  $form['basic'] = array('#type' => 'container', '#attributes' => array('class' => array('container-inline')));
+  $form['basic']['keys'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Please enter search word'),
+    '#default_value' => mysearch_clean_keys($keys),
+    '#size' => 40,
+    '#maxlength' => 255,
+  );
+  // Check if keys already provided then execute search using them.
+  if (!empty($keys)) {
+    $form['results'] = array(
+      '#type' => 'item',
+      '#markup' => mysearch_execute_search($keys),
+    );
+  }
+  // processed_keys is used to coordinate keyword passing between other forms
+  // that hook into the basic search form.
+  $form['basic']['processed_keys'] = array('#type' => 'value', '#value' => '');
+  $form['basic']['submit'] = array('#type' => 'submit', '#value' => t('Search'));
+
+  return $form;
+}
+
+/**
+ * Submit callback.
+ *
+ * @see mysearch_form().
+ */
+function mysearch_form_submit(&$form, &$form_state) {
+  if (!empty($form_state['values']['keys'])) {
+      $form_state['redirect'] = MYSEARCH_PATH . '/' . mysearch_clean_keys($form_state['values']['keys']);
+  }
+  else {
+      drupal_set_message(t('To execute search please enter words in form.'));
+  }
+}
+
+/**
+ * Helper to execute search by word in title and body node fields.
+ *
+ * @param $keys
+ *
+ * @return string
+ * @throws Exception
+ */
+function mysearch_execute_search($keys) {
+  !empty($_GET['page']) ? $get = check_plain($_GET['page']) : $get = '';
+  $keys = mysearch_clean_keys($keys);
+  // Get unique cache key.
+  $cache_key = 'myseach_' . md5($keys . $get);
+  // Implement custom caching scheme.
+  $cache = cache_get($cache_key, 'cache_mysearch_results');
+  if ($cache == FALSE) {
+    $query = db_select('node', 'n');
+    // Use PagerDefault decorator.
+    $query = $query->extend('PagerDefault')->limit(20);
+    // Join body field.
+    $query->Join('field_data_body', 'fdb', 'n.nid = fdb.entity_id');
+    $query->fields('n', array('nid', 'title'));
+    // Use or condition.
+    $or = db_or();
+    $or->condition('n.title', '%' . db_like($keys) . '%', 'LIKE');
+    $or->condition('fdb.body_value', '%' . db_like($keys) . '%', 'LIKE');
+    $query->condition($or);
+    // Execute query and get results as associative array.
+    $result = $query->execute()->fetchAll(PDO::FETCH_ASSOC);
+
+    //Check if results not empty.
+    if (!empty($result)) {
+      $links = array();
+      foreach ($result as &$item) {
+        $links[] = l($item['title'], 'node/' . $item['nid'], array('attributes' => array('target' => '_blank')));
+      }
+
+      $output = array(
+        'items' => array(
+          '#theme' => 'item_list',
+          '#items' => $links,
+        ),
+        'pager' => array(
+          '#theme' => 'pager',
+        ),
+      );
+      // Render to store rendered output and avoid render repetition.
+      $output = render($output);
+    }
+    else {
+      // If no results found provide message.
+      $output = t('No results found');
+    }
+    // Set cache.
+    cache_set($cache_key, $output, 'cache_mysearch_results', time() + variable_get('cache_lifetime', '3600'));
+
+    return $output;
+  }
+  else {
+    return $cache->data;
+  }
+
+}
+
+/**
+ * Helper to clean, decode and trim keys value.
+ *
+ * @param $keys
+ *
+ * @return string
+ */
+function mysearch_clean_keys($keys) {
+  return check_plain(trim(urldecode($keys)));
+}
+
+/**
+ * Implements hook_flush_caches().
+ */
+function mysearch_flush_caches() {
+  return array('cache_mysearch_results');
+}
